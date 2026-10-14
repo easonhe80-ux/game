@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Gunfire: Waves & Bosses</title>
+<style>
+:root{--bg:#f2f2f5;--fg:#16161d;--card:#fff;--ac:#e8553d;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#101015;--fg:#f0f0f5;--card:#1c1c25}}
+:root[data-theme="dark"]{--bg:#101015;--fg:#f0f0f5;--card:#1c1c25}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;padding:10px}
+#wrap{position:relative;width:100%;max-width:800px}
+canvas{width:100%;display:block;background:#1a1d26;border-radius:10px;cursor:crosshair;touch-action:none}
+.ov{position:absolute;inset:0;background:rgba(10,10,15,.88);color:#f0f0f5;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:14px;text-align:center;overflow:auto}
+.ov.hide{display:none}
+h1,h2{margin:0}
+button{font:inherit;border:0;border-radius:8px;padding:9px 14px;background:var(--ac);color:#fff;cursor:pointer;font-weight:600}
+button:disabled{opacity:.35;cursor:not-allowed}
+#shop{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;width:100%;max-width:560px}
+.it{background:#262b38;border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:5px;font-size:13px}
+p{margin:0;font-size:14px;opacity:.85}
+</style></head><body>
+<div id="wrap">
+<canvas id="c" width="800" height="560"></canvas>
+<div class="ov" id="menu"><h1>🔫 GUNFIRE</h1><p>WASD / arrows to move · mouse to aim · hold click to shoot<br>Survive waves, earn coins, upgrade your gun. Every 5th wave is a BOSS.</p><button id="start">Start</button></div>
+<div class="ov hide" id="shopov"><h2>Wave <span id="sw"></span> cleared!</h2><p>Coins: 🪙 <b id="coins"></b></p><div id="shop"></div><button id="next">Start next wave ▶</button></div>
+<div class="ov hide" id="over"><h1>Game Over</h1><p id="score"></p><button id="again">Play again</button></div>
+</div>
+<script>
+const cv=document.getElementById('c'),ctx=cv.getContext('2d'),W=800,H=560;
+const $=id=>document.getElementById(id);
+const keys={};let mouse={x:W/2,y:0,down:false};
+let P,bullets,ebul,enemies,parts,wave,coins,toSpawn,spawnT,state='menu',kills,boss;
+function reset(){P={x:W/2,y:H/2,r:14,hp:100,max:100,spd:190,dmg:10,rate:3,multi:1,cd:0,inv:0};
+bullets=[];ebul=[];enemies=[];parts=[];wave=0;coins=0;kills=0;boss=null;
+U.forEach(u=>u.lv=0);}
+const U=[
+{n:'💥 Damage',d:'+6 bullet damage',base:20,f:1.5,lv:0,ap:()=>P.dmg+=6},
+{n:'⚡ Fire Rate',d:'+0.8 shots/sec',base:25,f:1.5,lv:0,ap:()=>P.rate+=.8,mx:8},
+{n:'🔱 Multishot',d:'+1 bullet per shot',base:60,f:1.9,lv:0,ap:()=>P.multi++,mx:5},
+{n:'❤️ Max Health',d:'+30 max HP & heal',base:20,f:1.4,lv:0,ap:()=>{P.max+=30;P.hp+=30}},
+{n:'👟 Speed',d:'+20 move speed',base:15,f:1.4,lv:0,ap:()=>P.spd+=20,mx:6},
+{n:'🩹 Heal',d:'Restore full HP',base:15,f:1,lv:0,ap:()=>P.hp=P.max,rep:1}];
+const cost=u=>Math.round(u.base*Math.pow(u.f,u.lv));
+function buildShop(){$('coins').textContent=coins;$('sw').textContent=wave;const s=$('shop');s.innerHTML='';
+U.forEach(u=>{const c=cost(u),maxed=u.mx&&u.lv>=u.mx;const d=document.createElement('div');d.className='it';
+d.innerHTML=`<b>${u.n}${u.rep?'':' Lv'+u.lv}</b><span>${u.d}</span>`;
+const b=document.createElement('button');b.textContent=maxed?'MAX':'🪙 '+c;b.disabled=maxed||coins<c;
+b.onclick=()=>{coins-=c;u.ap();if(!u.rep)u.lv++;buildShop()};d.appendChild(b);s.appendChild(d)})}
+function startWave(){wave++;state='play';$('shopov').classList.add('hide');
+const isBoss=wave%5==0;toSpawn=isBoss?4+wave:5+wave*3;spawnT=0;
+if(isBoss){boss={x:W/2,y:-60,r:42,hp:300+wave*80,max:300+wave*80,t:0,boss:1,spd:45,val:100+wave*10,col:'#b5179e'};enemies.push(boss)}else boss=null;
+banner=isBoss?'⚠ BOSS WAVE '+wave+' ⚠':'Wave '+wave;bt=2}
+let banner='',bt=0;
+function spawn(){const side=Math.random()*4|0;let x,y;
+if(side==0){x=Math.random()*W;y=-20}else if(side==1){x=W+20;y=Math.random()*H}else if(side==2){x=Math.random()*W;y=H+20}else{x=-20;y=Math.random()*H}
+const r=Math.random(),k=wave*.08+1;let e;
+if(r<.2&&wave>1)e={r:11,hp:12*k,spd:120,val:4,col:'#ffd166'};
+else if(r<.35&&wave>2)e={r:20,hp:70*k,spd:42,val:10,col:'#6a994e'};
+else e={r:14,hp:25*k,spd:65+wave*2,val:5,col:'#ef476f'};
+e.x=x;e.y=y;e.max=e.hp;enemies.push(e)}
+function shoot(){const a=Math.atan2(mouse.y-P.y,mouse.x-P.x),n=P.multi,sp=.16;
+for(let i=0;i<n;i++){const o=(i-(n-1)/2)*sp,aa=a+o;bullets.push({x:P.x+Math.cos(aa)*20,y:P.y+Math.sin(aa)*20,vx:Math.cos(aa)*620,vy:Math.sin(aa)*620,l:1})}}
+function burst(x,y,c,n){for(let i=0;i<n;i++){const a=Math.random()*6.28,s=60+Math.random()*140;parts.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,l:.5,c})}}
+function update(dt){
+let dx=(keys.d||keys.arrowright?1:0)-(keys.a||keys.arrowleft?1:0),dy=(keys.s||keys.arrowdown?1:0)-(keys.w||keys.arrowup?1:0);
+if(dx||dy){const m=Math.hypot(dx,dy);P.x+=dx/m*P.spd*dt;P.y+=dy/m*P.spd*dt}
+P.x=Math.max(P.r,Math.min(W-P.r,P.x));P.y=Math.max(P.r,Math.min(H-P.r,P.y));
+P.cd-=dt;P.inv-=dt;if(mouse.down&&P.cd<=0){shoot();P.cd=1/P.rate}
+if(toSpawn>0){spawnT-=dt;if(spawnT<=0){spawn();toSpawn--;spawnT=Math.max(.25,1.1-wave*.04)}}
+bullets.forEach(b=>{b.x+=b.vx*dt;b.y+=b.vy*dt;if(b.x<0||b.x>W||b.y<0||b.y>H)b.l=0});
+ebul.forEach(b=>{b.x+=b.vx*dt;b.y+=b.vy*dt;if(b.x<-20||b.x>W+20||b.y<-20||b.y>H+20)b.l=0;
+if(Math.hypot(b.x-P.x,b.y-P.y)<P.r+6&&b.l){b.l=0;hurt(12)}});
+enemies.forEach(e=>{const a=Math.atan2(P.y-e.y,P.x-e.x);
+if(e.boss){e.t+=dt;const tx=W/2+Math.cos(e.t*.5)*250,ty=130+Math.sin(e.t*.8)*60;e.x+=(tx-e.x)*dt*.8;e.y+=(ty-e.y)*dt*.8;
+e.fc=(e.fc||0)-dt;if(e.fc<=0){e.fc=1.6;const n=10+wave,off=Math.random()*6;
+for(let i=0;i<n;i++){const q=off+i/n*6.283;ebul.push({x:e.x,y:e.y,vx:Math.cos(q)*150,vy:Math.sin(q)*150,l:1})}
+const q=a;for(let i=-1;i<=1;i++)ebul.push({x:e.x,y:e.y,vx:Math.cos(q+i*.15)*240,vy:Math.sin(q+i*.15)*240,l:1})}}
+else{e.x+=Math.cos(a)*e.spd*dt;e.y+=Math.sin(a)*e.spd*dt}
+if(Math.hypot(e.x-P.x,e.y-P.y)<e.r+P.r)hurt(e.boss?25:10);
+bullets.forEach(b=>{if(b.l&&Math.hypot(b.x-e.x,b.y-e.y)<e.r+4){b.l=0;e.hp-=P.dmg;e.hit=.08;burst(b.x,b.y,'#fff',2)}});
+if(e.hp<=0&&!e.dead){e.dead=1;coins+=e.val;kills++;burst(e.x,e.y,e.col,e.boss?60:12)}});
+enemies=enemies.filter(e=>!e.dead);bullets=bullets.filter(b=>b.l);ebul=ebul.filter(b=>b.l);
+parts.forEach(p=>{p.x+=p.vx*dt;p.y+=p.vy*dt;p.l-=dt});parts=parts.filter(p=>p.l>0);
+if(boss&&!enemies.includes(boss)){boss=null;ebul=[]}
+if(P.hp<=0){state='over';$('score').textContent=`You reached wave ${wave} with ${kills} kills.`;$('over').classList.remove('hide')}
+else if(toSpawn<=0&&enemies.length==0){state='shop';ebul=[];bullets=[];buildShop();$('shopov').classList.remove('hide')}}
+function hurt(d){if(P.inv>0)return;P.hp-=d;P.inv=.7;burst(P.x,P.y,'#4cc9f0',8)}
+function draw(){ctx.clearRect(0,0,W,H);
+ctx.strokeStyle='rgba(255,255,255,.04)';for(let i=0;i<W;i+=40){ctx.beginPath();ctx.moveTo(i,0);ctx.lineTo(i,H);ctx.stroke()}for(let i=0;i<H;i+=40){ctx.beginPath();ctx.moveTo(0,i);ctx.lineTo(W,i);ctx.stroke()}
+parts.forEach(p=>{ctx.globalAlpha=p.l*2;ctx.fillStyle=p.c;ctx.fillRect(p.x-2,p.y-2,4,4)});ctx.globalAlpha=1;
+ctx.fillStyle='#ffe66d';bullets.forEach(b=>{ctx.beginPath();ctx.arc(b.x,b.y,4,0,7);ctx.fill()});
+ctx.fillStyle='#ff6b6b';ebul.forEach(b=>{ctx.beginPath();ctx.arc(b.x,b.y,6,0,7);ctx.fill()});
+enemies.forEach(e=>{ctx.fillStyle=e.hit>0?'#fff':e.col;e.hit-=.016;ctx.beginPath();ctx.arc(e.x,e.y,e.r,0,7);ctx.fill();
+if(!e.boss&&e.hp<e.max){ctx.fillStyle='#000a';ctx.fillRect(e.x-e.r,e.y-e.r-8,e.r*2,4);ctx.fillStyle='#6f6';ctx.fillRect(e.x-e.r,e.y-e.r-8,e.r*2*e.hp/e.max,4)}});
+const a=Math.atan2(mouse.y-P.y,mouse.x-P.x);ctx.save();ctx.translate(P.x,P.y);ctx.rotate(a);
+ctx.globalAlpha=P.inv>0&&Math.floor(P.inv*20)%2?.4:1;ctx.fillStyle='#4cc9f0';ctx.beginPath();ctx.arc(0,0,P.r,0,7);ctx.fill();
+ctx.fillStyle='#ddd';ctx.fillRect(8,-4,20,8);ctx.restore();ctx.globalAlpha=1;
+ctx.fillStyle='#000a';ctx.fillRect(10,10,200,16);ctx.fillStyle='#4cd964';ctx.fillRect(10,10,200*Math.max(0,P.hp)/P.max,16);
+ctx.fillStyle='#fff';ctx.font='bold 12px sans-serif';ctx.fillText(Math.max(0,Math.ceil(P.hp))+' / '+P.max,16,22);
+ctx.font='bold 15px sans-serif';ctx.textAlign='right';ctx.fillText('🪙 '+coins+'   Wave '+wave,W-12,24);ctx.textAlign='left';
+if(boss){ctx.fillStyle='#000a';ctx.fillRect(W/2-200,H-30,400,14);ctx.fillStyle='#b5179e';ctx.fillRect(W/2-200,H-30,400*boss.hp/boss.max,14);ctx.fillStyle='#fff';ctx.fillText('BOSS',W/2-20,H-34)}
+if(bt>0){ctx.globalAlpha=Math.min(1,bt);ctx.font='bold 36px sans-serif';ctx.textAlign='center';ctx.fillStyle='#fff';ctx.fillText(banner,W/2,H/2-60);ctx.textAlign='left';ctx.globalAlpha=1}}
+let last=0;function loop(t){const dt=Math.min(.05,(t-last)/1000);last=t;if(state=='play'){update(dt);bt-=dt}if(state!='menu')draw();requestAnimationFrame(loop)}
+function mpos(e){const r=cv.getBoundingClientRect();mouse.x=(e.clientX-r.left)*W/r.width;mouse.y=(e.clientY-r.top)*H/r.height}
+cv.addEventListener('pointermove',mpos);cv.addEventListener('pointerdown',e=>{mpos(e);mouse.down=true});
+addEventListener('pointerup',()=>mouse.down=false);
+addEventListener('keydown',e=>{keys[e.key.toLowerCase()]=true;if(e.key==' '&&state=='shop')startWave()});
+addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+function begin(){reset();$('menu').classList.add('hide');$('over').classList.add('hide');startWave()}
+$('start').onclick=begin;$('again').onclick=begin;$('next').onclick=startWave;
+reset();requestAnimationFrame(loop);
+</script></body></html>
